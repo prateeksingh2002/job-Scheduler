@@ -1,0 +1,219 @@
+version: '3.8'
+
+services:
+#  yugabytedb:
+#    image: yugabytedb/yugabyte:latest
+#    container_name: yugabytedb
+#    command: [ "bin/yugabyted", "start", "--daemon=false" ]
+#    ports:
+#      - "5433:5433"  # YSQL
+#      - "7000:7000"  # Master UI
+#      - "9042:9042"  # YCQL
+#    environment:
+#      YSQL_USER: yugabyte
+#      YSQL_PASSWORD: yugabyte
+#    volumes:
+#      - yugabyte_data:/mnt/data
+#    healthcheck:
+#      test: [ "CMD-SHELL", "until ysqlsh -h localhost -U yugabyte -d yugabyte -c 'SELECT 1;' >/dev/null 2>&1; do sleep 5; done" ]
+#      interval: 15s
+#      timeout: 30s
+#      retries: 10
+#      start_period: 90s
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: "2.0"
+#          memory: 4G
+  yugabytedb:
+    image: yugabytedb/yugabyte:latest
+    container_name: yugabytedb
+    command: [ "bin/yugabyted", "start", "--daemon=false" ]
+    ports:
+      - "5433:5433"  # YSQL
+      - "7000:7000"  # Master UI
+      - "9042:9042"  # YCQL
+    environment:
+      YSQL_USER: yugabyte
+      YSQL_PASSWORD: yugabyte
+    volumes:
+      - yugabyte_data:/mnt/data
+    healthcheck:
+      test: [ "CMD", "/home/yugabyte/bin/ysqlsh", "-h", "127.0.0.1", "-U", "yugabyte", "-d", "yugabyte", "-c", "SELECT 1;" ]
+      interval: 20s
+      timeout: 10s
+      retries: 15
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+
+
+
+  zookeeper:
+      image: confluentinc/cp-zookeeper:7.3.0
+      container_name: zookeeper
+      ports:
+        - "2181:2181"
+      environment:
+        ZOOKEEPER_CLIENT_PORT: 2181
+        ZOOKEEPER_TICK_TIME: 2000
+        ZOOKEEPER_INIT_LIMIT: 10
+        ZOOKEEPER_SYNC_LIMIT: 5
+        ZOOKEEPER_SERVER_JVMFLAGS: "-Xmx512M -Xms256M"
+        ZOOKEEPER_4LW_COMMANDS_WHITELIST: "*"  # Allow all 4-letter commands
+      healthcheck:
+        test: [ "CMD-SHELL", "nc -z 127.0.0.1 2181 || exit 1" ]  # Simple port check
+        interval: 10s
+        timeout: 20s
+        retries: 5
+        start_period: 30s  # Extra time for initial startup
+      volumes:
+        - zookeeper_data:/data
+      deploy:
+        resources:
+          limits:
+            cpus: '0.5'
+            memory: 1G
+
+#  zookeeper:
+#    image: confluentinc/cp-zookeeper:7.3.0
+#    container_name: zookeeper
+#    ports:
+#      - "2181:2181"
+#    environment:
+#      ZOOKEEPER_CLIENT_PORT: 2181
+#      ZOOKEEPER_TICK_TIME: 2000
+#      ZOOKEEPER_INIT_LIMIT: 10
+#      ZOOKEEPER_SYNC_LIMIT: 5
+#      ZOOKEEPER_SERVER_JVMFLAGS: "-Xmx1G -Xms512M"
+#      ZOOKEEPER_4LW_COMMANDS_WHITELIST: "*"
+#      ZOOKEEPER_AUTOPURGE_PURGEINTERVAL: 1
+#      ZOOKEEPER_AUTOPURGE_SNAPRETAINCOUNT: 3
+#      ZOOKEEPER_MAX_CLIENT_CNXNS: 60
+#    healthcheck:
+#      test: [ "CMD-SHELL", "echo ruok | nc localhost 2181 | grep imok" ]
+#      interval: 30s
+#      timeout: 10s
+#      retries: 5
+#      start_period: 60s
+#    volumes:
+#      - zookeeper_data:/data
+#    deploy:
+#      resources:
+#        limits:
+#          cpus: '1.0'
+#          memory: 2G
+
+  kafka:
+    image: confluentinc/cp-kafka:7.3.0
+    container_name: kafka
+    hostname: kafka
+    ports:
+      - "9092:9092"
+      - "9999:9999"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_HEAP_OPTS: "-Xmx1536m -Xms1024m"
+      KAFKA_JMX_PORT: 9999
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD-SHELL", "kafka-topics --bootstrap-server kafka:29092 --list || exit 1" ]
+      interval: 30s
+      timeout: 30s
+      retries: 10
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2G
+
+
+  minio:
+    image: minio/minio
+    container_name: minio
+    ports:
+      - "9000:9000"  # API
+      - "9001:9001"  # Console
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_REGION: us-east-1
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    command: server /data --console-address ":9001"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
+
+  job-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: job-scheduler
+    ports:
+      - "8080:8080"
+    depends_on:
+      yugabytedb:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://yugabytedb:5433/yugabyte
+      SPRING_DATASOURCE_USERNAME: yugabyte
+      SPRING_DATASOURCE_PASSWORD: yugabyte
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET_NAME: job-binaries
+      JOB_EXECUTION_TEMP_DIR: /tmp/job-executions
+      SPRING_PROFILES_ACTIVE: docker
+    volumes:
+      - job_executions:/tmp/job-executions
+      - ./target:/app/target:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 30s
+      retries: 10
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2G
+
+volumes:
+  yugabyte_data:
+  zookeeper_data:
+  minio_data:
+  job_executions:
+
+networks:
+  default:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
